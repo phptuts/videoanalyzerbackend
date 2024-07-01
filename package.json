@@ -9,6 +9,7 @@
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.4.5",
+    "firebase-admin": "^12.2.0",
     "openai": "^4.52.2",
     "speechmatics": "^4.0.0"
   }
