@@ -1,6 +1,7 @@
 const dotenv = require("dotenv");
 const admin = require("firebase-admin");
 const { Speechmatics } = require("speechmatics");
+const { OpenAI } = require("openai");
 
 // Allows us to use the .env file.
 dotenv.config();
@@ -69,4 +70,68 @@ async function transcribeVideo(doc) {
   );
 
   await doc.ref.update({ transcribedText, status: "transcribed" });
+}
+
+// Listens for videos that have recently been transcribed.
+admin
+  .firestore()
+  .collection("videos")
+  .where("status", "==", "transcribed")
+  .onSnapshot(async (snapshot) => {
+    const docChanges = snapshot.docChanges().filter((d) => d.type == "added");
+
+    for (let docChange of docChanges) {
+      try {
+        await answerQuestionForVideo(docChange.doc);
+      } catch (error) {
+        console.log(error);
+        await doc.ref.update({ status: "error_openai" });
+      }
+    }
+  });
+
+/**
+ * Loops through all the questions the user asked about the video to be generated.
+ *
+ * @param {admin.firestore.QueryDocumentSnapshot} doc
+ */
+async function answerQuestionForVideo(doc) {
+  const docData = doc.data();
+  const questions = docData.questions;
+  for (let question of questions) {
+    const answer = await askOpenAQuestionAI(
+      docData.title,
+      docData.transcribedText,
+      question.text
+    );
+    question.answer = answer;
+  }
+
+  await doc.ref.update({ questions: questions, status: "completed" });
+}
+
+/**
+ * Asks open ai a question based on the transcribed video.
+ *
+ * @param {string} videoTitle
+ * @param {string} transcribedText
+ * @param {string} questionText
+ * @returns {string} answered question
+ */
+async function askOpenAQuestionAI(videoTitle, transcribedText, questionText) {
+  const openai = new OpenAI({
+    apiKey: process.env.OPEN_AI_APIKEY,
+  });
+  const response = await openai.chat.completions.create({
+    messages: [
+      { role: "system", content: `Video Title: ${videoTitle}` },
+      {
+        role: "system",
+        content: `Transcribed text of video: ${transcribedText}`,
+      },
+      { role: "user", content: questionText },
+    ],
+    model: "gpt-3.5-turbo",
+  });
+  return response.choices[0].message.content;
 }
